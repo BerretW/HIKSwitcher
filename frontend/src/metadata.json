@@ -1,0 +1,5 @@
+{
+  "name": "Hikvision ISAPI Smart Explorer",
+  "description": "A web-based tool for exploring and configuring Hikvision camera ISAPI settings, with specialized helpers for Loxone integration.",
+  "requestFramePermissions": []
+}
