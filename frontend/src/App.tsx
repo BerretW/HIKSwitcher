@@ -33,14 +33,23 @@ const App: React.FC = () => {
     }
   }, [user, pass]);
 
-  const getSafeUrl = useCallback((base: string, path: string) => {
-    let cleanBase = base.trim();
-    if (cleanBase.endsWith('/')) cleanBase = cleanBase.slice(0, -1);
-    if (!/^https?:\/\//i.test(cleanBase)) {
-      cleanBase = `http://${cleanBase}`;
-    }
+  const getSafeUrl = useCallback((targetIp: string, path: string) => {
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    return `${cleanBase}${cleanPath}`;
+    
+    // Zjistíme, zda běžíme v produkčním módu (Docker/Build)
+    // Vite nastavuje import.meta.env.PROD na true po buildu
+    if (import.meta.env.PROD) {
+      // V Dockeru použijeme naši Nginx proxy
+      // Výsledek např: /camera-proxy/192.168.10.150/ISAPI/Image/channels/1
+      return `/camera-proxy/${targetIp.trim()}${cleanPath}`;
+    } else {
+      // Lokální vývoj (npm run dev) - stále zkoušíme napřímo (bude vyžadovat CORS plugin v prohlížeči)
+      let cleanBase = targetIp.trim();
+      if (!/^https?:\/\//i.test(cleanBase)) {
+        cleanBase = `http://${cleanBase}`;
+      }
+      return `${cleanBase}${cleanPath}`;
+    }
   }, []);
 
   const buildTree = useCallback((xmlDoc: Document, capsDoc: Document | null): HikNode[] => {
@@ -142,12 +151,14 @@ const App: React.FC = () => {
     if (!selectedNode) return;
     const { name, element } = findModuleElement(selectedNode);
     
-    if (name === nodes[0].tag) {
-      alert("Cannot send root element. Please select a specific parameter.");
+    if (selectedNode.id === nodes[0].id) {
+      alert("Nemůžete editovat samotný kořenový element (Složku). Vyberte konkrétní parametr pod ním.");
       return;
     }
+    const pathSuffix = name === nodes[0].tag ? '' : `/${name}`;
+    const targetUrl = getSafeUrl(ip, `${BASE_PATH}${pathSuffix}`);
+    // -------------------------
 
-    const targetUrl = getSafeUrl(ip, `${BASE_PATH}/${name}`);
     if (!confirm(`Send PUT request to camera?\nPath: ${targetUrl}\nValue: ${editValue}`)) return;
 
     setLoading(true);
@@ -191,21 +202,31 @@ const App: React.FC = () => {
 
   const handleShowLoxone = () => {
     if (!selectedNode) return;
+    
+    // Získáme element modulu (např. ImageChannel nebo Color), do kterého vybraný parametr patří
     const { name, element } = findModuleElement(selectedNode);
 
-    if (name === nodes[0].tag) {
-      alert("Select a parameter within a section (not root).");
+    // BEZPEČNOSTNÍ KONTROLA:
+    // Zakážeme akci pouze pokud uživatel vybral přímo kořenovou složku ve stromu.
+    // Pokud vybral parametr UVNITŘ (i když je to v rootu), povolíme to.
+    if (selectedNode.id === nodes[0].id) {
+      alert("Nemůžete generovat příkaz pro celou kořenovou složku. Vyberte konkrétní parametr uvnitř.");
       return;
     }
 
+    // Uložíme si původní hodnotu, abychom ji pak vrátili zpět
     const originalValue = selectedNode.rawElement.textContent;
+    // Dočasně nastavíme novou hodnotu z inputu do XML elementu
     selectedNode.rawElement.textContent = editValue;
     
+    // Vyčistíme XML od jmenných prostorů (namespaces), které Loxone nemá rád
     let xmlBody = cleanXmlElement(element);
     let isDimmer = false;
 
+    // Logika pro posuvníky (Range/Slider) -> Loxone Stmívač
     if (selectedNode.capabilities?.min !== undefined) {
       const tag = selectedNode.tag;
+      // Najdeme v XML řetězci naši hodnotu a nahradíme ji zástupným znakem \v pro Loxone
       const pattern = `<${tag}>${editValue}</${tag}>`;
       const replacement = `<${tag}>\\v</${tag}>`;
       if (xmlBody.includes(pattern)) {
@@ -214,11 +235,17 @@ const App: React.FC = () => {
       }
     }
 
+    // Vrátíme původní hodnotu zpět do objektu (aby se nám nerozbilo UI aplikace)
     selectedNode.rawElement.textContent = originalValue; 
 
+    // GENERUJEME URL CESTU:
+    // Pokud je parametr součástí hlavního kořene (ImageChannel), posíláme data na BASE_PATH.
+    // Pokud je v pod-sekci (např. Color), přidáme /Color.
+    const pathSuffix = name === nodes[0].tag ? '' : `/${name}`;
+
     setLoxoneConfig({
-      address: `http://${user}:${pass}@${ip}`,
-      instruction: `${BASE_PATH}/${name}`,
+      address: `http://${user}:${pass}@${ip}`, // Pro Loxone generujeme přímou IP (ne přes Proxy)
+      instruction: `${BASE_PATH}${pathSuffix}`,
       body: xmlBody,
       isDimmer
     });

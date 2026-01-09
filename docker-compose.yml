@@ -1,0 +1,12 @@
+services:
+  hikvision-explorer:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: hikvision-explorer
+    restart: always
+    ports:
+      # Mapování portů: 
+      # Vlevo je port na Debian serveru (např. 8080), vpravo port uvnitř kontejneru (80)
+      # Aplikace bude dostupná na http://IP-SERVERU:8080
+      - "8080:80"

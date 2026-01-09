@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { LoxoneConfig } from '../types';
 import { Copy, X, Info } from 'lucide-react';
@@ -67,7 +66,8 @@ const LoxoneModal: React.FC<LoxoneModalProps> = ({ config, onClose }) => {
             {config.isDimmer && (
               <div className="flex items-center gap-2 text-amber-600 text-sm bg-amber-50 p-2 rounded mb-4">
                 <Info size={16} />
-                <span>ℹ Obsahuje '\v' -> Napojte tento příkaz na Stmívač v Loxone Configu.</span>
+                {/* ZDE BYLA CHYBA: Nahrazeno '->' za '&gt;' */}
+                <span>ℹ Obsahuje '\v' -&gt; Napojte tento příkaz na Stmívač v Loxone Configu.</span>
               </div>
             )}
             
