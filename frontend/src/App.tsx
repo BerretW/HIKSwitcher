@@ -202,52 +202,81 @@ const App: React.FC = () => {
 
   const handleShowLoxone = () => {
     if (!selectedNode) return;
-    
-    // Získáme element modulu (např. ImageChannel nebo Color), do kterého vybraný parametr patří
-    const { name, element } = findModuleElement(selectedNode);
 
-    // BEZPEČNOSTNÍ KONTROLA:
-    // Zakážeme akci pouze pokud uživatel vybral přímo kořenovou složku ve stromu.
-    // Pokud vybral parametr UVNITŘ (i když je to v rootu), povolíme to.
-    if (selectedNode.id === nodes[0].id) {
-      alert("Nemůžete generovat příkaz pro celou kořenovou složku. Vyberte konkrétní parametr uvnitř.");
+    // 1. Získáme surový DOM element vybraného parametru
+    const currentDomEl = selectedNode.rawElement;
+    
+    // Zjistíme jméno kořenového tagu (ImageChannel)
+    const rootTagName = nodes[0].tag;
+
+    // 2. Hledáme "Kontextový Modul" (stejně jako Python metoda get_context_module)
+    // Musíme jít nahoru po rodičích, dokud nenarazíme na přímého potomka kořene.
+    
+    let moduleEl = currentDomEl;
+    let parent = moduleEl.parentElement;
+
+    // Pokud uživatel klikl přímo na kořen (ImageChannel), zakážeme to
+    if (!parent && moduleEl.nodeName === rootTagName) {
+      alert("Vyberte konkrétní parametr uvnitř nastavení.");
       return;
     }
 
-    // Uložíme si původní hodnotu, abychom ji pak vrátili zpět
-    const originalValue = selectedNode.rawElement.textContent;
-    // Dočasně nastavíme novou hodnotu z inputu do XML elementu
-    selectedNode.rawElement.textContent = editValue;
-    
-    // Vyčistíme XML od jmenných prostorů (namespaces), které Loxone nemá rád
-    let xmlBody = cleanXmlElement(element);
-    let isDimmer = false;
+    // Procházíme strom nahoru, dokud rodič není Root (ImageChannel)
+    // Tím najdeme sekci, např. <SupplementLight> nebo <videoInputID>
+    while (parent && parent.nodeName !== rootTagName && parent.parentElement) {
+      moduleEl = parent;
+      parent = parent.parentElement;
+    }
 
-    // Logika pro posuvníky (Range/Slider) -> Loxone Stmívač
-    if (selectedNode.capabilities?.min !== undefined) {
-      const tag = selectedNode.tag;
-      // Najdeme v XML řetězci naši hodnotu a nahradíme ji zástupným znakem \v pro Loxone
-      const pattern = `<${tag}>${editValue}</${tag}>`;
-      const replacement = `<${tag}>\\v</${tag}>`;
-      if (xmlBody.includes(pattern)) {
-        xmlBody = xmlBody.replace(pattern, replacement);
-        isDimmer = true;
+    // Nyní 'moduleEl' je XML element sekce (např. SupplementLight)
+    const moduleName = moduleEl.nodeName;
+
+    // 3. Vytvoříme kopii (klon) této sekce, abychom mohli změnit hodnotu
+    // (nechceme měnit živá data v aplikaci, jen vygenerovat XML pro Loxone)
+    const clone = moduleEl.cloneNode(true) as Element;
+
+    // 4. Najdeme v klonu ten správný tag, který chceme změnit
+    // Pokud editujeme přímo sekci (např. videoInputID), klon je to, co měníme.
+    // Pokud editujeme supplementLightMode uvnitř SupplementLight, musíme ho v klonu najít.
+    let targetInClone: Element | null = null;
+
+    if (moduleEl === currentDomEl) {
+      // Editujeme přímo "Level 1" parametr
+      targetInClone = clone;
+    } else {
+      // Jsme hlouběji, musíme najít odpovídající tag v klonu
+      const matches = clone.getElementsByTagName(selectedNode.tag);
+      if (matches.length > 0) {
+        targetInClone = matches[0];
       }
     }
 
-    // Vrátíme původní hodnotu zpět do objektu (aby se nám nerozbilo UI aplikace)
-    selectedNode.rawElement.textContent = originalValue; 
+    // 5. Změníme hodnotu v klonu
+    if (targetInClone) {
+      // Logika pro stmívač (\v)
+      if (selectedNode.capabilities?.min !== undefined) {
+        targetInClone.textContent = "\\v";
+        // Pro Loxone config nastavíme příznak, že jde o stmívač
+        // (pozn. toto jen ovlivní zobrazení v modálním okně)
+      } else {
+        targetInClone.textContent = editValue;
+      }
+    }
 
-    // GENERUJEME URL CESTU:
-    // Pokud je parametr součástí hlavního kořene (ImageChannel), posíláme data na BASE_PATH.
-    // Pokud je v pod-sekci (např. Color), přidáme /Color.
-    const pathSuffix = name === nodes[0].tag ? '' : `/${name}`;
+    // 6. Převedeme klon na čistý XML string (odstraníme namespaces, stejně jako v Pythonu)
+    const xmlBody = cleanXmlElement(clone);
 
+    // 7. Sestavíme URL
+    // Python logika: url = BASE_PATH + "/" + moduleName
+    // Např. .../ISAPI/Image/channels/1/SupplementLight
+    const urlSuffix = `/${moduleName}`;
+
+    // Nastavíme stav pro modální okno
     setLoxoneConfig({
-      address: `http://${user}:${pass}@${ip}`, // Pro Loxone generujeme přímou IP (ne přes Proxy)
-      instruction: `${BASE_PATH}${pathSuffix}`,
+      address: `http://${user}:${pass}@${ip}`,
+      instruction: `${BASE_PATH}${urlSuffix}`,
       body: xmlBody,
-      isDimmer
+      isDimmer: selectedNode.capabilities?.min !== undefined
     });
   };
 
@@ -343,7 +372,7 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center gap-4">
           <div className="flex items-center gap-2 mr-4 group cursor-default">
             <Settings className="text-blue-400 group-hover:rotate-90 transition-transform duration-500" />
-            <h1 className="font-bold text-lg tracking-tight">HikSmart Explorer</h1>
+            <h1 className="font-bold text-lg tracking-tight">LPD Loxone Hik Connector</h1>
           </div>
           
           <div className="flex flex-wrap items-center gap-3 flex-1 w-full md:w-auto">
